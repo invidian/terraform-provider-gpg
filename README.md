@@ -1,6 +1,6 @@
 # GPG Terraform Provider [![Build Status](https://travis-ci.com/invidian/terraform-provider-gpg.svg?branch=master)](https://travis-ci.com/invidian/terraform-provider-gpg)
 
-This providers allows to generate GPG encrypted message in ASCII-armored format using Terraform.
+This provider allows to generate GPG encrypted message in ASCII-armored format using Terraform.
 
 This provider uses built-in [openpgp](https://godoc.org/golang.org/x/crypto/openpgp) Golang library to perform GPG encryption. Currently the only supported option is encrypting message with public keys.
 
