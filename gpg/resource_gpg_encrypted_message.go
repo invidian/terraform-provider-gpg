@@ -1,4 +1,4 @@
-package main
+package gpg
 
 import (
 	"bytes"
