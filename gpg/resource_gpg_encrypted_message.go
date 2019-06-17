@@ -32,7 +32,8 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				MinItems: 1,
 				ForceNew: true,
 				Elem: &schema.Schema{
-					Type: schema.TypeString,
+					Type:     schema.TypeString,
+					ForceNew: true,
 					StateFunc: func(val interface{}) string {
 						recipient, err := entityFromString(val.(string))
 						if err != nil {
@@ -51,6 +52,7 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 			"result": &schema.Schema{
 				Type:      schema.TypeString,
 				Computed:  true,
+				ForceNew:  true,
 				StateFunc: sha256sum,
 			},
 		},
