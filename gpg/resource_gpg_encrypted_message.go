@@ -102,7 +102,7 @@ func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) er
 	}
 
 	// Calculate SHA-256 checksum of message for ID
-	d.SetId(fmt.Sprintf("%x", sha256sum(result)))
+	d.SetId(sha256sum(result))
 
 	return resourceGPGEncryptedMessageRead(d, m)
 }
