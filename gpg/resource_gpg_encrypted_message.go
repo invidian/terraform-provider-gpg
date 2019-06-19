@@ -50,10 +50,9 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				Required: true,
 			},
 			"result": &schema.Schema{
-				Type:      schema.TypeString,
-				Computed:  true,
-				ForceNew:  true,
-				StateFunc: sha256sum,
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
 			},
 		},
 	}
