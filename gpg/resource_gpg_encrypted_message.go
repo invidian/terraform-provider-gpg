@@ -25,6 +25,7 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				Type:      schema.TypeString,
 				Required:  true,
 				ForceNew:  true,
+				Sensitive: true,
 				StateFunc: sha256sum,
 			},
 			"public_keys": &schema.Schema{
@@ -32,7 +33,8 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				MinItems: 1,
 				ForceNew: true,
 				Elem: &schema.Schema{
-					Type: schema.TypeString,
+					Type:     schema.TypeString,
+					ForceNew: true,
 					StateFunc: func(val interface{}) string {
 						recipient, err := entityFromString(val.(string))
 						if err != nil {
@@ -49,9 +51,9 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				Required: true,
 			},
 			"result": &schema.Schema{
-				Type:      schema.TypeString,
-				Computed:  true,
-				StateFunc: sha256sum,
+				Type:     schema.TypeString,
+				Computed: true,
+				ForceNew: true,
 			},
 		},
 	}
@@ -100,7 +102,7 @@ func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) er
 	}
 
 	// Calculate SHA-256 checksum of message for ID
-	d.SetId(fmt.Sprintf("%x", sha256sum(result)))
+	d.SetId(sha256sum(result))
 
 	return resourceGPGEncryptedMessageRead(d, m)
 }
