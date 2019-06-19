@@ -25,6 +25,7 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				Type:      schema.TypeString,
 				Required:  true,
 				ForceNew:  true,
+				Sensitive: true,
 				StateFunc: sha256sum,
 			},
 			"public_keys": &schema.Schema{
