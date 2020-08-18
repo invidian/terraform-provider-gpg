@@ -1,22 +1,15 @@
-package gpg
+package gpg_test
 
 import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+
+	"github.com/invidian/terraform-provider-gpg/gpg"
 )
 
-var testProviders map[string]terraform.ResourceProvider
-
-func init() {
-	testProviders = map[string]terraform.ResourceProvider{
-		"gpg": Provider(),
-	}
-}
-
 func TestProvider(t *testing.T) {
-	if err := Provider().(*schema.Provider).InternalValidate(); err != nil {
-		t.Fatalf("err: %s", err)
+	if err := gpg.Provider().(*schema.Provider).InternalValidate(); err != nil {
+		t.Fatalf("validating provider internally: %v", err)
 	}
 }

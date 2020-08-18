@@ -1,1 +1,1 @@
-package gpg
+package gpg_test
