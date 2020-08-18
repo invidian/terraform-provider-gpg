@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/openpgp/packet"
@@ -21,17 +21,18 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 		Delete: resourceGPGEncryptedMessageDelete,
 
 		Schema: map[string]*schema.Schema{
-			"content": &schema.Schema{
+			"content": {
 				Type:      schema.TypeString,
 				Required:  true,
 				ForceNew:  true,
 				Sensitive: true,
 				StateFunc: sha256sum,
 			},
-			"public_keys": &schema.Schema{
+			"public_keys": {
 				Type:     schema.TypeList,
 				MinItems: 1,
 				ForceNew: true,
+				Required: true,
 				Elem: &schema.Schema{
 					Type:     schema.TypeString,
 					ForceNew: true,
@@ -41,70 +42,116 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 							// We only keep KeyId in state, as we want to keep it small and also
 							// we always read public keys anyway. If public key is malformed,
 							// creation of resource will fail anyway, so it's fine to set it here.
-							return fmt.Sprintf("MALFORMED KEY")
+							return "MALFORMED KEY"
 						}
 
-						// Instead of full ASCII-armored key, write only KeyId to state
+						// Instead of full ASCII-armored key, write only KeyId to state.
 						return recipient.PrimaryKey.KeyIdString()
 					},
 				},
-				Required: true,
 			},
-			"result": &schema.Schema{
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
+			"result": {
+				Type:      schema.TypeString,
+				Computed:  true,
+				ForceNew:  true,
+				Sensitive: true,
 			},
 		},
 	}
 }
 
-func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) error {
-	// Store recipients for encryption
+func getRecipients(d *schema.ResourceData) ([]*openpgp.Entity, error) {
+	// Store recipients for encryption.
 	recipients := []*openpgp.Entity{}
-	// Store ID of each public key, to store them in state (StateFunc does not work for TypeList for some reason)
-	pks_ids := []string{}
 
-	// Iterate over public keys, decode, parse, collect their IDs and add to recipients list
+	// Iterate over public keys, decode, parse, collect their IDs and add to recipients list.
 	for i, pk := range d.Get("public_keys").([]interface{}) {
 		recipient, err := entityFromString(pk.(string))
 		if err != nil {
-			return fmt.Errorf("Unable to decode public_keys[%d]: %v", i, err)
+			return nil, fmt.Errorf("decoding public key #%d: %w", i, err)
 		}
 
 		recipients = append(recipients, recipient)
-		pks_ids = append(pks_ids, recipient.PrimaryKey.KeyIdString())
 	}
 
-	if err := d.Set("public_keys", pks_ids); err != nil {
-		return fmt.Errorf("Failed to set public_keys property:  %v", err)
+	return recipients, nil
+}
+
+func savePublicKeys(d *schema.ResourceData, recipients []*openpgp.Entity) error {
+	// Store ID of each public key, to store them in state (StateFunc does not work for TypeList for some reason).
+	pksIDs := []string{}
+
+	for _, recipient := range recipients {
+		pksIDs = append(pksIDs, recipient.PrimaryKey.KeyIdString())
 	}
 
-	buf := new(bytes.Buffer)
+	if err := d.Set("public_keys", pksIDs); err != nil {
+		return fmt.Errorf("setting %q property: %w", "public_keys", err)
+	}
 
-	// We produce output in ASCII-armor format
-	wc_encode, err := armor.Encode(buf, "PGP MESSAGE", nil)
+	return nil
+}
+
+func encryptMessage(recipients []*openpgp.Entity, message string, destination io.Writer) error {
+	wcEncrypt, err := openpgp.Encrypt(destination, recipients, nil, &openpgp.FileHints{IsBinary: true}, nil)
 	if err != nil {
-		return fmt.Errorf("Encoding the message failed: %v", err)
+		return fmt.Errorf("encrypting message: %w", err)
 	}
-	wc_encrypt, err := openpgp.Encrypt(wc_encode, recipients, nil, &openpgp.FileHints{IsBinary: true}, nil)
+
+	if _, err := io.Copy(wcEncrypt, strings.NewReader(message)); err != nil {
+		return fmt.Errorf("writing content to buffer: %w", err)
+	}
+
+	if err := wcEncrypt.Close(); err != nil {
+		return fmt.Errorf("closing encrypted message: %w", err)
+	}
+
+	return nil
+}
+
+func encryptAndEncodeMessage(recipients []*openpgp.Entity, message string) (string, error) {
+	var buf bytes.Buffer
+
+	// We produce output in ASCII-armor format.
+	wcEncode, err := armor.Encode(&buf, "PGP MESSAGE", nil)
 	if err != nil {
-		return fmt.Errorf("Encrypting the message failed: %v", err)
-	}
-	if _, err := io.Copy(wc_encrypt, strings.NewReader(d.Get("content").(string))); err != nil {
-		return fmt.Errorf("Failed writing content to buffer: %v", err)
-	}
-	wc_encrypt.Close()
-	wc_encode.Close()
-	result := buf.String()
-	if err := d.Set("result", result); err != nil {
-		return fmt.Errorf("Failed to set result property: %v", err)
+		return "", fmt.Errorf("encoding message: %w", err)
 	}
 
-	// Calculate SHA-256 checksum of message for ID
-	d.SetId(sha256sum(result))
+	if err := encryptMessage(recipients, message, wcEncode); err != nil {
+		return "", fmt.Errorf("encrypting message: %w", err)
+	}
 
-	return resourceGPGEncryptedMessageRead(d, m)
+	if err := wcEncode.Close(); err != nil {
+		return "", fmt.Errorf("closing encoded message: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) error {
+	recipients, err := getRecipients(d)
+	if err != nil {
+		return fmt.Errorf("getting recipients: %w", err)
+	}
+
+	if err := savePublicKeys(d, recipients); err != nil {
+		return fmt.Errorf("saving public keys: %w", err)
+	}
+
+	encryptedMessage, err := encryptAndEncodeMessage(recipients, d.Get("content").(string))
+	if err != nil {
+		return fmt.Errorf("encrypting message: %w", err)
+	}
+
+	if err := d.Set("result", encryptedMessage); err != nil {
+		return fmt.Errorf("setting %q property: %w", "result", err)
+	}
+
+	// Calculate SHA-256 checksum of message for ID.
+	d.SetId(sha256sum(encryptedMessage))
+
+	return nil
 }
 
 func resourceGPGEncryptedMessageRead(d *schema.ResourceData, m interface{}) error {
@@ -112,18 +159,20 @@ func resourceGPGEncryptedMessageRead(d *schema.ResourceData, m interface{}) erro
 }
 
 func resourceGPGEncryptedMessageDelete(d *schema.ResourceData, m interface{}) error {
+	d.SetId("")
+
 	return nil
 }
 
 func entityFromString(key string) (*openpgp.Entity, error) {
 	block, err := armor.Decode(strings.NewReader(key))
 	if err != nil {
-		return nil, fmt.Errorf("Unable to decode public_keys: %v", err)
+		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
 
 	recipient, err := openpgp.ReadEntity(packet.NewReader(block.Body))
 	if err != nil {
-		return nil, fmt.Errorf("Unable to parse public_key: %v", err)
+		return nil, fmt.Errorf("parsing public key: %w", err)
 	}
 
 	return recipient, nil
