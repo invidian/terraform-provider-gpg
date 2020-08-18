@@ -45,7 +45,7 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 							return "MALFORMED KEY"
 						}
 
-						// Instead of full ASCII-armored key, write only KeyId to state
+						// Instead of full ASCII-armored key, write only KeyId to state.
 						return recipient.PrimaryKey.KeyIdString()
 					},
 				},
@@ -61,10 +61,10 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 }
 
 func getRecipients(d *schema.ResourceData) ([]*openpgp.Entity, error) {
-	// Store recipients for encryption
+	// Store recipients for encryption.
 	recipients := []*openpgp.Entity{}
 
-	// Iterate over public keys, decode, parse, collect their IDs and add to recipients list
+	// Iterate over public keys, decode, parse, collect their IDs and add to recipients list.
 	for i, pk := range d.Get("public_keys").([]interface{}) {
 		recipient, err := entityFromString(pk.(string))
 		if err != nil {
@@ -78,7 +78,7 @@ func getRecipients(d *schema.ResourceData) ([]*openpgp.Entity, error) {
 }
 
 func savePublicKeys(d *schema.ResourceData, recipients []*openpgp.Entity) error {
-	// Store ID of each public key, to store them in state (StateFunc does not work for TypeList for some reason)
+	// Store ID of each public key, to store them in state (StateFunc does not work for TypeList for some reason).
 	pksIDs := []string{}
 
 	for _, recipient := range recipients {
@@ -112,7 +112,7 @@ func encryptMessage(recipients []*openpgp.Entity, message string, destination io
 func encryptAndEncodeMessage(recipients []*openpgp.Entity, message string) (string, error) {
 	var buf bytes.Buffer
 
-	// We produce output in ASCII-armor format
+	// We produce output in ASCII-armor format.
 	wcEncode, err := armor.Encode(&buf, "PGP MESSAGE", nil)
 	if err != nil {
 		return "", fmt.Errorf("encoding message: %w", err)
