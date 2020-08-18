@@ -32,6 +32,7 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 				Type:     schema.TypeList,
 				MinItems: 1,
 				ForceNew: true,
+				Required: true,
 				Elem: &schema.Schema{
 					Type:     schema.TypeString,
 					ForceNew: true,
@@ -48,31 +49,39 @@ func resourceGPGEncryptedMessage() *schema.Resource {
 						return recipient.PrimaryKey.KeyIdString()
 					},
 				},
-				Required: true,
 			},
 			"result": {
-				Type:     schema.TypeString,
-				Computed: true,
-				ForceNew: true,
+				Type:      schema.TypeString,
+				Computed:  true,
+				ForceNew:  true,
+				Sensitive: true,
 			},
 		},
 	}
 }
 
-func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) error {
+func getRecipients(d *schema.ResourceData) ([]*openpgp.Entity, error) {
 	// Store recipients for encryption
 	recipients := []*openpgp.Entity{}
-	// Store ID of each public key, to store them in state (StateFunc does not work for TypeList for some reason)
-	pksIDs := []string{}
 
 	// Iterate over public keys, decode, parse, collect their IDs and add to recipients list
 	for i, pk := range d.Get("public_keys").([]interface{}) {
 		recipient, err := entityFromString(pk.(string))
 		if err != nil {
-			return fmt.Errorf("decoding public key #%d: %w", i, err)
+			return nil, fmt.Errorf("decoding public key #%d: %w", i, err)
 		}
 
 		recipients = append(recipients, recipient)
+	}
+
+	return recipients, nil
+}
+
+func savePublicKeys(d *schema.ResourceData, recipients []*openpgp.Entity) error {
+	// Store ID of each public key, to store them in state (StateFunc does not work for TypeList for some reason)
+	pksIDs := []string{}
+
+	for _, recipient := range recipients {
 		pksIDs = append(pksIDs, recipient.PrimaryKey.KeyIdString())
 	}
 
@@ -80,20 +89,16 @@ func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) er
 		return fmt.Errorf("setting %q property: %w", "public_keys", err)
 	}
 
-	buf := new(bytes.Buffer)
+	return nil
+}
 
-	// We produce output in ASCII-armor format
-	wcEncode, err := armor.Encode(buf, "PGP MESSAGE", nil)
-	if err != nil {
-		return fmt.Errorf("encoding message: %w", err)
-	}
-
-	wcEncrypt, err := openpgp.Encrypt(wcEncode, recipients, nil, &openpgp.FileHints{IsBinary: true}, nil)
+func encryptMessage(recipients []*openpgp.Entity, message string, destination io.Writer) error {
+	wcEncrypt, err := openpgp.Encrypt(destination, recipients, nil, &openpgp.FileHints{IsBinary: true}, nil)
 	if err != nil {
 		return fmt.Errorf("encrypting message: %w", err)
 	}
 
-	if _, err := io.Copy(wcEncrypt, strings.NewReader(d.Get("content").(string))); err != nil {
+	if _, err := io.Copy(wcEncrypt, strings.NewReader(message)); err != nil {
 		return fmt.Errorf("writing content to buffer: %w", err)
 	}
 
@@ -101,20 +106,52 @@ func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) er
 		return fmt.Errorf("closing encrypted message: %w", err)
 	}
 
-	if err := wcEncode.Close(); err != nil {
-		return fmt.Errorf("closing encoded message: %w", err)
+	return nil
+}
+
+func encryptAndEncodeMessage(recipients []*openpgp.Entity, message string) (string, error) {
+	var buf bytes.Buffer
+
+	// We produce output in ASCII-armor format
+	wcEncode, err := armor.Encode(&buf, "PGP MESSAGE", nil)
+	if err != nil {
+		return "", fmt.Errorf("encoding message: %w", err)
 	}
 
-	result := buf.String()
+	if err := encryptMessage(recipients, message, wcEncode); err != nil {
+		return "", fmt.Errorf("encrypting message: %w", err)
+	}
 
-	if err := d.Set("result", result); err != nil {
+	if err := wcEncode.Close(); err != nil {
+		return "", fmt.Errorf("closing encoded message: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+func resourceGPGEncryptedMessageCreate(d *schema.ResourceData, m interface{}) error {
+	recipients, err := getRecipients(d)
+	if err != nil {
+		return fmt.Errorf("getting recipients: %w", err)
+	}
+
+	if err := savePublicKeys(d, recipients); err != nil {
+		return fmt.Errorf("saving public keys: %w", err)
+	}
+
+	encryptedMessage, err := encryptAndEncodeMessage(recipients, d.Get("content").(string))
+	if err != nil {
+		return fmt.Errorf("encrypting message: %w", err)
+	}
+
+	if err := d.Set("result", encryptedMessage); err != nil {
 		return fmt.Errorf("setting %q property: %w", "result", err)
 	}
 
-	// Calculate SHA-256 checksum of message for ID
-	d.SetId(sha256sum(result))
+	// Calculate SHA-256 checksum of message for ID.
+	d.SetId(sha256sum(encryptedMessage))
 
-	return resourceGPGEncryptedMessageRead(d, m)
+	return nil
 }
 
 func resourceGPGEncryptedMessageRead(d *schema.ResourceData, m interface{}) error {
