@@ -159,6 +159,8 @@ func resourceGPGEncryptedMessageRead(d *schema.ResourceData, m interface{}) erro
 }
 
 func resourceGPGEncryptedMessageDelete(d *schema.ResourceData, m interface{}) error {
+	d.SetId("")
+
 	return nil
 }
 
